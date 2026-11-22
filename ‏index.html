@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام فواتير لغوصة</title>
+    <style>
+        :root {
+            --primary: #d97706;
+            --dark: #1f2937;
+            --light: #f9fafb;
+            --border: #e5e7eb;
+        }
+        * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+        body { margin: 0; padding: 15px; background: var(--light); color: var(--dark); }
+        
+        /* التبويبات */
+        .tabs { display: flex; gap: 8px; margin-bottom: 15px; }
+        .tab-btn { flex: 1; padding: 12px; border: none; border-radius: 8px; background: #e5e7eb; font-weight: bold; cursor: pointer; font-size: 14px; }
+        .tab-btn.active { background: var(--primary); color: white; }
+        .section { display: none; }
+        .section.active { display: block; }
+
+        /* البطاقات والمدخلات */
+        .card { background: white; padding: 15px; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); margin-bottom: 15px; }
+        h3 { margin-top: 0; border-bottom: 2px solid var(--border); padding-bottom: 8px; font-size: 16px; }
+        input, select, button { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; }
+        button.btn-primary { background: var(--primary); color: white; border: none; font-weight: bold; cursor: pointer; }
+        button.btn-success { background: #10b981; color: white; border: none; font-weight: bold; cursor: pointer; }
+        button.btn-danger { background: #ef4444; color: white; border: none; padding: 5px 10px; width: auto; font-size: 12px; }
+        
+        /* شبكة المنيو */
+        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 15px; }
+        .menu-item-btn { background: #fffbeb; border: 1px solid #fcd34d; color: var(--dark); padding: 10px; border-radius: 8px; text-align: center; cursor: pointer; font-weight: bold; }
+        .menu-item-btn span { display: block; font-size: 12px; color: var(--primary); margin-top: 4px; }
+
+        /* الجداول */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 14px; }
+        th, td { border-bottom: 1px solid var(--border); padding: 8px 4px; text-align: center; }
+        th { background: #f3f4f6; }
+        .qty-controls button { width: 28px; height: 28px; padding: 0; margin: 0 2px; display: inline-block; }
+
+        /* تصميم الفاتورة للطباعة */
+        .invoice-header { text-align: center; margin-bottom: 15px; }
+        .invoice-header img { max-width: 110px; max-height: 110px; border-radius: 10px; margin-bottom: 5px; }
+        .total-box { background: #f3f4f6; padding: 12px; border-radius: 8px; font-size: 18px; font-weight: bold; text-align: center; margin: 10px 0; }
+        .payment-info { font-size: 13px; background: #fffbeb; padding: 10px; border-radius: 6px; border: 1px dashed var(--primary); text-align: center; }
+
+        /* إعدادات الطباعة والـ PDF */
+        @media print {
+            body { background: white; padding: 0; }
+            .no-print { display: none !important; }
+            .card { box-shadow: none; padding: 0; }
+            #invoice-section { display: block !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- أزرار التنقل -->
+    <div class="tabs no-print">
+        <button class="tab-btn active" onclick="switchTab('invoice-section', this)">🧾 فاتورة جديدة</button>
+        <button class="tab-btn" onclick="switchTab('menu-section', this)">🍔 المنيو</button>
+        <button class="tab-btn" onclick="switchTab('history-section', this)">📂 السجل</button>
+        <button class="tab-btn" onclick="switchTab('settings-section', this)">⚙️ الإعدادات</button>
+    </div>
+
+    <!-- 1. قسم الفاتورة الجديدة -->
+    <div id="invoice-section" class="section active">
+        <div class="card no-print">
+            <h3>اختر من المنيو للإضافة</h3>
+            <div id="menu-buttons" class="menu-grid"></div>
+        </div>
+
+        <!-- منطقة الفاتورة القابلة للطباعة -->
+        <div class="card" id="printable-invoice">
+            <div class="invoice-header">
+                <img id="display-logo" src="" alt="شعار لغوصة" style="display:none;">
+                <h2 style="margin:5px 0;">لغوصة</h2>
+                <div style="font-size: 13px; color: #6b7280;">
+                    رقم الفاتورة: <strong id="inv-number">#1001</strong> | 
+                    التاريخ: <span id="inv-date"></span>
+                </div>
+            </div>
+
+            <input type="text" id="customer-name" placeholder="اسم العميل (اختياري)" class="no-print">
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>الصنف</th>
+                        <th>السعر</th>
+                        <th>الكمية</th>
+                        <th>الإجمالي</th>
+                        <th class="no-print">حذف</th>
+                    </tr>
+                </thead>
+                <tbody id="invoice-items"></tbody>
+            </table>
+
+            <div class="total-box">
+                الإجمالي المطلوب: <span id="grand-total">0</span>
+            </div>
+
+            <div class="payment-info" id="display-payment">
+                يرجى إضافة بيانات الحساب والمحفظة من الإعدادات
+            </div>
+        </div>
+
+        <div class="no-print">
+            <button class="btn-success" onclick="saveAndPrint()">💾 حفظ وإصدار PDF / طباعة</button>
+            <button class="btn-primary" style="background:#6b7280;" onclick="resetInvoice()">🔄 فاتورة جديدة (تصفير)</button>
+        </div>
+    </div>
+
+    <!-- 2. قسم إدارة المنيو -->
+    <div id="menu-section" class="section no-print">
+        <div class="card">
+            <h3>إضافة صنف جديد للمنيو</h3>
+            <input type="text" id="new-item-name" placeholder="اسم الصنف (مثال: برجر لغوصة)">
+            <input type="number" id="new-item-price" placeholder="السعر">
+            <button class="btn-primary" onclick="addMenuItem()">➕ إضافة للمنيو</button>
+        </div>
+
+        <div class="card">
+            <h3>قائمة الأصناف الحالية</h3>
+            <table>
+                <thead>
+                    <tr><th>الصنف</th><th>السعر</th><th>إجراء</th></tr>
+                </thead>
+                <tbody id="menu-list-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 3. قسم سجل الفواتير السابقة -->
+    <div id="history-section" class="section no-print">
+        <div class="card">
+            <h3>سجل الفواتير المحفوظة</h3>
+            <table>
+                <thead>
+                    <tr><th>رقم</th><th>التاريخ</th><th>العميل</th><th>الإجمالي</th><th>عرض</th></tr>
+                </thead>
+                <tbody id="history-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 4. قسم الإعدادات (الشعار والحسابات) -->
+    <div id="settings-section" class="section no-print">
+        <div class="card">
+            <h3>الشعار وبيانات الدفع</h3>
+            <label style="font-size:13px; font-weight:bold;">رفع شعار لغوصة الرسمي:</label>
+            <input type="file" id="logo-upload" accept="image/*" onchange="uploadLogo(event)">
+            
+            <label style="font-size:13px; font-weight:bold;">بيانات الحساب البنكي والمحفظة:</label>
+            <textarea id="payment-details" rows="4" style="width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; margin-bottom:10px;" placeholder="مثال:&#10;حساب الكريمي: 123456789&#10;محفظة جوالي / ون كاش: 777000000"></textarea>
+            
+            <button class="btn-primary" onclick="saveSettings()">💾 حفظ الإعدادات</button>
+        </div>
+    </div>
+
+    <script>
+        // تهيئة البيانات من الذاكرة المحلية (LocalStorage)
+        let menu = JSON.parse(localStorage.getItem('laghwasa_menu')) || [
+            { name: 'وجبة لغوصة خاص', price: 2500 },
+            { name: 'بطاطس بالجبن', price: 1000 },
+            { name: 'مشروب غازي', price: 300 }
+        ];
+        let invoices = JSON.parse(localStorage.getItem('laghwasa_invoices')) || [];
+        let invCounter = parseInt(localStorage.getItem('laghwasa_counter')) || 1001;
+        let settings = JSON.parse(localStorage.getItem('laghwasa_settings')) || {
+            logo: '',
+            payment: 'رقم الحساب / المحفظة: يضاف من الإعدادات'
+        };
+        let currentCart = [];
+
+        // تشغيل الدوال الأساسية عند فتح الصفحة
+        window.onload = () => {
+            updateDateAndNumber();
+            renderMenu();
+            loadSettingsUI();
+            renderHistory();
+        };
+
+        // التنقل بين التبويبات
+        function switchTab(sectionId, btn) {
+            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            btn.classList.add('active');
+        }
+
+        // تحديث رقم الفاتورة والتاريخ
+        function updateDateAndNumber() {
+            document.getElementById('inv-number').innerText = '#' + invCounter;
+            const today = new Date();
+            document.getElementById('inv-date').innerText = today.toLocaleDateString('ar-EG');
+        }
+
+        // عرض المنيو في الفاتورة وفي صفحة الإدارة
+        function renderMenu() {
+            const btnContainer = document.getElementById('menu-buttons');
+            const tableBody = document.getElementById('menu-list-table');
+            btnContainer.innerHTML = '';
+            tableBody.innerHTML = '';
+
+            menu.forEach((item, index) => {
+                // أزرار الاختيار السريع
+                btnContainer.innerHTML += `
+                    <div class="menu-item-btn" onclick="addToCart(${index})">
+                        ${item.name}
+                        <span>${item.price}</span>
+                    </div>
+                `;
+                // جدول الإدارة
+                tableBody.innerHTML += `
+                    <tr>
+                        <td>${item.name}</td>
+                        <td>${item.price}</td>
+                        <td><button class="btn-danger" onclick="deleteMenuItem(${index})">حذف</button></td>
+                    </tr>
+                `;
+            });
+        }
+
+        // إضافة صنف جديد للمنيو
+        function addMenuItem() {
+            const name = document.getElementById('new-item-name').value.trim();
+            const price = parseFloat(document.getElementById('new-item-price').value);
+            if (!name || isNaN(price)) return alert('يرجى إدخال اسم الصنف والسعر بشكل صحيح');
+            
+            menu.push({ name, price });
+            localStorage.setItem('laghwasa_menu', JSON.stringify(menu));
+            document.getElementById('new-item-name').value = '';
+            document.getElementById('new-item-price').value = '';
+            renderMenu();
+        }
+
+        function deleteMenuItem(index) {
+            menu.splice(index, 1);
+            localStorage.setItem('laghwasa_menu', JSON.stringify(menu));
+            renderMenu();
+        }
+
+        // إضافة صنف للفاتورة الحالية
+        function addToCart(menuIndex) {
+            const item = menu[menuIndex];
+            const existing = currentCart.find(i => i.name === item.name);
+            if (existing) {
+                existing.qty++;
+            } else {
+                currentCart.push({ name: item.name, price: item.price, qty: 1 });
+            }
+            renderCart();
+        }
+
+        // تحديث جدول الفاتورة وحساب الإجمالي
+        function renderCart() {
+            const tbody = document.getElementById('invoice-items');
+            tbody.innerHTML = '';
+            let total = 0;
+
+            currentCart.forEach((item, index) => {
+                const subTotal = item.price * item.qty;
+                total += subTotal;
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${item.name}</td>
+                        <td>${item.price}</td>
+                        <td class="qty-controls">
+                            <button class="no-print" onclick="changeQty(${index}, -1)">-</button>
+                            ${item.qty}
+                            <button class="no-print" onclick="changeQty(${index}, 1)">+</button>
+                        </td>
+                        <td>${subTotal}</td>
+                        <td class="no-print"><button class="btn-danger" onclick="removeFromCart(${index})">X</button></td>
+                    </tr>
+                `;
+            });
+            document.getElementById('grand-total').innerText = total;
+        }
+
+        function changeQty(index, delta) {
+            currentCart[index].qty += delta;
+            if (currentCart[index].qty <= 0) currentCart.splice(index, 1);
+            renderCart();
+        }
+
+        function removeFromCart(index) {
+            currentCart.splice(index, 1);
+            renderCart();
+        }
+
+        // حفظ الفاتورة والطباعة PDF
+        function saveAndPrint() {
+            if (currentCart.length === 0) return alert('الفاتورة فارغة!');
+            
+            const total = document.getElementById('grand-total').innerText;
+            const customer = document.getElementById('customer-name').value || 'عميل نقدي';
+            const date = document.getElementById('inv-date').innerText;
+
+            const newInvoice = {
+                number: invCounter,
+                date: date,
+                customer: customer,
+                items: [...currentCart],
+                total: total
+            };
+
+            invoices.unshift(newInvoice);
+            localStorage.setItem('laghwasa_invoices', JSON.stringify(invoices));
+            
+            invCounter++;
+            localStorage.setItem('laghwasa_counter', invCounter);
+            
+            renderHistory();
+            window.print(); // يفتح نافذة الطباعة وحفظ PDF في الآيفون
+        }
+
+        function resetInvoice() {
+            currentCart = [];
+            document.getElementById('customer-name').value = '';
+            updateDateAndNumber();
+            renderCart();
+        }
+
+        // عرض سجل الفواتير
+        function renderHistory() {
+            const tbody = document.getElementById('history-table');
+            tbody.innerHTML = '';
+            invoices.forEach((inv, index) => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>#${inv.number}</td>
+                        <td>${inv.date}</td>
+                        <td>${inv.customer}</td>
+                        <td>${inv.total}</td>
+                        <td><button class="btn-primary" style="padding:4px 8px; font-size:12px;" onclick="loadOldInvoice(${index})">فتح</button></td>
+                    </tr>
+                `;
+            });
+        }
+
+        function loadOldInvoice(index) {
+            const inv = invoices[index];
+            document.getElementById('inv-number').innerText = '#' + inv.number;
+            document.getElementById('inv-date').innerText = inv.date;
+            document.getElementById('customer-name').value = inv.customer;
+            currentCart = [...inv.items];
+            renderCart();
+            switchTab('invoice-section', document.querySelectorAll('.tab-btn')[0]);
+        }
+
+        // الإعدادات (الشعار والحسابات)
+        function uploadLogo(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                settings.logo = e.target.result;
+                applySettings();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function saveSettings() {
+            settings.payment = document.getElementById('payment-details').value;
+            localStorage.setItem('laghwasa_settings', JSON.stringify(settings));
+            applySettings();
+            alert('تم حفظ الإعدادات بنجاح!');
+        }
+
+        function loadSettingsUI() {
+            document.getElementById('payment-details').value = settings.payment;
+            applySettings();
+        }
+
+        function applySettings() {
+            const logoImg = document.getElementById('display-logo');
+            if (settings.logo) {
+                logoImg.src = settings.logo;
+                logoImg.style.display = 'inline-block';
+            }
+            document.getElementById('display-payment').innerText = settings.payment;
+        }
+    </script>
+</body>
+</html>
